@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	filippo.io/age v1.3.1
 	github.com/jackc/pgx/v5 v5.7.6
-	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/stretchr/testify v1.11.1
 	modernc.org/sqlite v1.46.1
 )
