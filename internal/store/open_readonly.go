@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -18,8 +19,11 @@ func OpenReadOnly(path string) (*Store, error) {
 		return nil, err
 	}
 
-	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&immutable=1"
-	db, err := sql.Open("sqlite", dsn)
+	// Build the SQLite URI via net/url so paths containing URI metacharacters
+	// (`?`, `#`, spaces) are escaped instead of being parsed as part of the
+	// URI grammar.
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), RawQuery: "mode=ro&immutable=1"}
+	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}
