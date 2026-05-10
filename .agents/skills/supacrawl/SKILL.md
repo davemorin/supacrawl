@@ -24,8 +24,12 @@ supacrawl init --project-id <label>
 supacrawl doctor --json
 supacrawl sync --json
 supacrawl status --json
+supacrawl diff /path/to/older-archive.db --json
 supacrawl size --json
 ```
+
+Use diff against a copy of the archive made before the sync you want to compare
+against.
 
 Read commands auto-refresh stale metadata by default. Override the policy when
 needed:

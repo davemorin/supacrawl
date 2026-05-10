@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davemorin/supacrawl/internal/postgres"
 	"github.com/davemorin/supacrawl/internal/storage"
 	"github.com/davemorin/supacrawl/internal/store"
 )
@@ -19,6 +20,8 @@ func renderText(w io.Writer, title string, value any) error {
 		renderStatus(w, v)
 	case store.Report:
 		renderReport(w, v)
+	case store.DiffResult:
+		renderDiff(w, v)
 	case []store.SearchResult:
 		renderSearchResults(w, v)
 	case store.SQLResult:
@@ -68,6 +71,95 @@ func renderReport(w io.Writer, report store.Report) {
 		fmt.Fprintln(w, "\n  policy tables")
 		for _, row := range report.PolicyTables {
 			fmt.Fprintf(w, "    %s.%s: %d policies\n", row.Schema, row.Table, row.Policies)
+		}
+	}
+}
+
+func renderDiff(w io.Writer, diff store.DiffResult) {
+	fmt.Fprintf(w, "  current: %s\n", renderArchiveRef(diff.Current))
+	fmt.Fprintf(w, "  baseline: %s\n", renderArchiveRef(diff.Baseline))
+	if diff.ProjectMismatch {
+		fmt.Fprintf(w, "  warning: current and baseline archives are from different projects (current=%s, baseline=%s)\n", emptyUnknown(diff.Current.ProjectID), emptyUnknown(diff.Baseline.ProjectID))
+	}
+	renderTableDiff(w, diff.Tables)
+	renderPolicyDiff(w, diff.Policies)
+	renderStorageBucketDiff(w, diff.StorageBuckets)
+}
+
+func renderTableDiff(w io.Writer, diff store.TableDiff) {
+	if len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0 {
+		fmt.Fprintln(w, "\n  tables: no changes")
+		return
+	}
+	fmt.Fprintf(w, "\n  tables: +%d added, -%d removed, ~%d changed\n", len(diff.Added), len(diff.Removed), len(diff.Changed))
+	if len(diff.Added) > 0 {
+		fmt.Fprintln(w, "    added:")
+		for _, row := range diff.Added {
+			fmt.Fprintf(w, "      + %s\n", tableLabel(row))
+		}
+	}
+	if len(diff.Removed) > 0 {
+		fmt.Fprintln(w, "    removed:")
+		for _, row := range diff.Removed {
+			fmt.Fprintf(w, "      - %s\n", tableLabel(row))
+		}
+	}
+	if len(diff.Changed) > 0 {
+		fmt.Fprintln(w, "    changed:")
+		for _, change := range diff.Changed {
+			fmt.Fprintf(w, "      ~ %s%s\n", change.Key, tableChangeSummary(change))
+		}
+	}
+}
+
+func renderPolicyDiff(w io.Writer, diff store.PolicyDiff) {
+	if len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0 {
+		fmt.Fprintln(w, "\n  policies: no changes")
+		return
+	}
+	fmt.Fprintf(w, "\n  policies: +%d added, -%d removed, ~%d changed\n", len(diff.Added), len(diff.Removed), len(diff.Changed))
+	if len(diff.Added) > 0 {
+		fmt.Fprintln(w, "    added:")
+		for _, row := range diff.Added {
+			fmt.Fprintf(w, "      + %s\n", policyLabel(row))
+		}
+	}
+	if len(diff.Removed) > 0 {
+		fmt.Fprintln(w, "    removed:")
+		for _, row := range diff.Removed {
+			fmt.Fprintf(w, "      - %s\n", policyLabel(row))
+		}
+	}
+	if len(diff.Changed) > 0 {
+		fmt.Fprintln(w, "    changed:")
+		for _, change := range diff.Changed {
+			fmt.Fprintf(w, "      ~ %s%s\n", change.Key, policyChangeSummary(change))
+		}
+	}
+}
+
+func renderStorageBucketDiff(w io.Writer, diff store.StorageBucketDiff) {
+	if len(diff.Added) == 0 && len(diff.Removed) == 0 && len(diff.Changed) == 0 {
+		fmt.Fprintln(w, "\n  storage_buckets: no changes")
+		return
+	}
+	fmt.Fprintf(w, "\n  storage_buckets: +%d added, -%d removed, ~%d changed\n", len(diff.Added), len(diff.Removed), len(diff.Changed))
+	if len(diff.Added) > 0 {
+		fmt.Fprintln(w, "    added:")
+		for _, row := range diff.Added {
+			fmt.Fprintf(w, "      + %s\n", storageBucketLabel(row))
+		}
+	}
+	if len(diff.Removed) > 0 {
+		fmt.Fprintln(w, "    removed:")
+		for _, row := range diff.Removed {
+			fmt.Fprintf(w, "      - %s\n", storageBucketLabel(row))
+		}
+	}
+	if len(diff.Changed) > 0 {
+		fmt.Fprintln(w, "    changed:")
+		for _, change := range diff.Changed {
+			fmt.Fprintf(w, "      ~ %s%s\n", change.Key, storageBucketChangeSummary(change))
 		}
 	}
 }
@@ -145,4 +237,105 @@ func humanBytes(value int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTPE"[exp])
+}
+
+func renderArchiveRef(ref store.ArchiveRef) string {
+	collected := "unknown"
+	if !ref.CollectedAt.IsZero() {
+		collected = ref.CollectedAt.Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%s (project=%s, collected=%s)", ref.Path, emptyUnknown(ref.ProjectID), collected)
+}
+
+func tableChangeSummary(change store.TableChange) string {
+	parts := make([]string, 0, len(change.ChangedFields))
+	for _, field := range change.ChangedFields {
+		parts = append(parts, fmt.Sprintf("%s: %s -> %s", field, tableFieldValue(change.Before, field), tableFieldValue(change.After, field)))
+	}
+	return renderChangeParts(parts)
+}
+
+func policyChangeSummary(change store.PolicyChange) string {
+	parts := make([]string, 0, len(change.ChangedFields))
+	for _, field := range change.ChangedFields {
+		parts = append(parts, fmt.Sprintf("%s: %s -> %s", field, policyFieldValue(change.Before, field), policyFieldValue(change.After, field)))
+	}
+	return renderChangeParts(parts)
+}
+
+func storageBucketChangeSummary(change store.StorageBucketChange) string {
+	parts := make([]string, 0, len(change.ChangedFields))
+	for _, field := range change.ChangedFields {
+		parts = append(parts, fmt.Sprintf("%s: %s -> %s", field, storageBucketFieldValue(change.Before, field), storageBucketFieldValue(change.After, field)))
+	}
+	return renderChangeParts(parts)
+}
+
+func renderChangeParts(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+func tableFieldValue(row postgres.Table, field string) string {
+	switch field {
+	case "rls_enabled":
+		return strconv.FormatBool(row.RLSEnabled)
+	case "rls_forced":
+		return strconv.FormatBool(row.RLSForced)
+	case "comment":
+		return row.Comment
+	case "kind":
+		return row.Kind
+	default:
+		return ""
+	}
+}
+
+func policyFieldValue(row postgres.Policy, field string) string {
+	switch field {
+	case "command":
+		return row.Command
+	case "roles":
+		return row.Roles
+	case "using":
+		return row.Using
+	case "check":
+		return row.Check
+	default:
+		return ""
+	}
+}
+
+func storageBucketFieldValue(row postgres.StorageBucket, field string) string {
+	switch field {
+	case "public":
+		return strconv.FormatBool(row.Public)
+	case "file_size_limit":
+		return row.FileSizeLimit
+	case "allowed_mime_types":
+		return row.AllowedMimeTypes
+	default:
+		return ""
+	}
+}
+
+func tableLabel(row postgres.Table) string {
+	return row.Schema + "." + row.Name
+}
+
+func policyLabel(row postgres.Policy) string {
+	return row.Schema + "." + row.TableName + "." + row.Name
+}
+
+func storageBucketLabel(row postgres.StorageBucket) string {
+	return row.ID
+}
+
+func emptyUnknown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }

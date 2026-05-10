@@ -72,6 +72,7 @@ go run ./cmd/supacrawl status
 go run ./cmd/supacrawl status --sync never
 go run ./cmd/supacrawl size
 go run ./cmd/supacrawl search "auth policies"
+go run ./cmd/supacrawl diff ~/.supacrawl/supacrawl-before.db
 go run ./cmd/supacrawl export --type jsonl --out companies.jsonl public.companies
 go run ./cmd/supacrawl storage pull --dir ./supabase-storage --limit 10
 go run ./cmd/supacrawl backup keygen --out ~/.supacrawl/age.key
@@ -94,6 +95,7 @@ If you build the binary, replace `go run ./cmd/supacrawl` with `./bin/supacrawl`
 - `sync --data` or `sync --full` also copies base table rows into `table_rows`
 - `status` prints archive counts
 - `report` summarizes schemas and policy coverage
+- `diff` compares the current archive to another archive file
 - `size` reports archive file size and largest copied source tables
 - `search` searches crawled tables, functions, storage buckets, and extensions
 - `export` writes copied source rows for one table as JSONL or CSV
@@ -183,6 +185,17 @@ Use `--no-row-fts` when archive size matters more than full-text search over row
 ```bash
 supacrawl sync --full --no-row-fts
 ```
+
+## Diff
+
+Compare the current archive against another SQLite archive file:
+
+```bash
+supacrawl diff <other-archive.db>
+```
+
+The first diff compares tables, policies, and Storage buckets, including RLS,
+policy expressions, and public bucket changes.
 
 ## Export
 

@@ -222,7 +222,8 @@ create index if not exists idx_table_rows_table on table_rows(schema_name, table
 `
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 type Status struct {
@@ -317,7 +318,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 func (s *Store) Close() error {

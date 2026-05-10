@@ -5,8 +5,10 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/davemorin/supacrawl/internal/postgres"
+	"github.com/davemorin/supacrawl/internal/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,6 +70,26 @@ func TestMetadataCommand(t *testing.T) {
 	require.Contains(t, stdout.String(), `"encrypted-backup"`)
 }
 
+func TestDiffCommandJSON(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	currentPath := filepath.Join(dir, "supacrawl.db")
+	baselinePath := filepath.Join(dir, "baseline.db")
+	var stdout bytes.Buffer
+	app := &App{Stdout: &stdout, Stderr: &bytes.Buffer{}}
+
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "init", "--db", currentPath, "--project-id", "demo"}))
+	stdout.Reset()
+	writeTestSnapshot(t, baselinePath, true)
+	writeTestSnapshot(t, currentPath, false)
+
+	require.NoError(t, app.Run(ctx, []string{"--config", configPath, "diff", baselinePath, "--json", "--sync", "never"}))
+	require.Contains(t, stdout.String(), `"project_mismatch": false`)
+	require.Contains(t, stdout.String(), `"changed_fields": [`)
+	require.Contains(t, stdout.String(), `"rls_enabled"`)
+}
+
 func TestDataProgressWritesToStderr(t *testing.T) {
 	var stderr bytes.Buffer
 	app := &App{Stdout: &bytes.Buffer{}, Stderr: &stderr}
@@ -79,4 +101,28 @@ func TestDataProgressWritesToStderr(t *testing.T) {
 
 	require.Contains(t, stderr.String(), "copying public.companies")
 	require.Contains(t, stderr.String(), "copied public.companies: 2 rows")
+}
+
+func writeTestSnapshot(t *testing.T, path string, rlsEnabled bool) {
+	t.Helper()
+	st, err := store.Open(path)
+	require.NoError(t, err)
+	defer st.Close()
+
+	require.NoError(t, st.PutSnapshot(context.Background(), postgres.Snapshot{
+		Project: postgres.ProjectInfo{
+			ID:            "demo",
+			DatabaseName:  "postgres",
+			CurrentUser:   "postgres",
+			ServerVersion: "16.0",
+			CollectedAt:   time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
+		},
+		Tables: []postgres.Table{{
+			Schema:     "public",
+			Name:       "profiles",
+			Kind:       "table",
+			Owner:      "postgres",
+			RLSEnabled: rlsEnabled,
+		}},
+	}))
 }

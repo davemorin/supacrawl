@@ -86,6 +86,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.runStatus(ctx, *configPath, rest[1:], outputFormat)
 	case "report":
 		return a.runReport(ctx, *configPath, rest[1:], outputFormat)
+	case "diff":
+		return a.runDiff(ctx, *configPath, rest[1:], outputFormat)
 	case "search":
 		return a.runSearch(ctx, *configPath, rest[1:], outputFormat)
 	case "sql":
@@ -444,6 +446,7 @@ func (a *App) runMetadata(configPath string, format OutputFormat) error {
 			"sync",
 			"status",
 			"report",
+			"diff",
 			"size",
 			"search",
 			"export",
@@ -479,6 +482,7 @@ func (a *App) runMetadata(configPath string, format OutputFormat) error {
 			"storage-pull",
 			"encrypted-backup",
 			"auto-sync",
+			"archive-diff",
 			"fts-search",
 			"read-only-sql",
 			"json-output",
@@ -539,6 +543,43 @@ func (a *App) runReport(ctx context.Context, configPath string, args []string, f
 		return err
 	}
 	return a.writeOutput("Report", report, format)
+}
+
+func (a *App) runDiff(ctx context.Context, configPath string, args []string, format OutputFormat) error {
+	// Sync policy applies only to the current archive; the baseline is immutable.
+	args, overrides, err := parseReadSyncArgs(args)
+	if err != nil {
+		return err
+	}
+	if len(args) != 1 {
+		return errors.New("usage: supacrawl diff <baseline-path> [--sync auto|always|never] [--stale-after duration]")
+	}
+	baselinePath, err := config.ExpandPath(args[0])
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		return err
+	}
+	if err := a.ensureFresh(ctx, cfg, mergeReadSyncOptions(defaultReadSyncOptions(cfg), overrides)); err != nil {
+		return err
+	}
+	current, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer current.Close()
+	baseline, err := store.OpenReadOnly(baselinePath)
+	if err != nil {
+		return err
+	}
+	defer baseline.Close()
+	diff, err := current.Diff(ctx, baseline)
+	if err != nil {
+		return err
+	}
+	return a.writeOutput("diff", diff, format)
 }
 
 func (a *App) runSearch(ctx context.Context, configPath string, args []string, format OutputFormat) error {
@@ -1112,6 +1153,7 @@ Commands:
   sync       crawl Supabase/Postgres metadata into SQLite; add --full for rows
   status     print archive counts
   report     summarize schemas and policy coverage
+  diff       compare current archive to another archive file
   size       show local archive size breakdown
   search     search tables, functions, storage buckets, extensions
   export     export copied table rows as jsonl or csv
@@ -1127,6 +1169,7 @@ Quick start:
   supacrawl sync
   supacrawl sync --full --no-row-fts
   supacrawl status --sync auto --stale-after 15m
+  supacrawl diff /path/to/older-archive.db --json
   supacrawl size
   supacrawl export --type jsonl --out companies.jsonl public.companies
   supacrawl storage pull --dir ./supabase-storage
