@@ -14,6 +14,7 @@ type Crawler struct {
 	DatabaseURL    string
 	ProjectID      string
 	ExcludeSchemas []string
+	ExcludeTables  []string
 }
 
 type DoctorReport struct {
@@ -105,16 +106,22 @@ func (c Crawler) CrawlData(ctx context.Context, tables []Table, batchSize int, e
 		return DataCopyStats{}, err
 	}
 	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, `set statement_timeout = 0`); err != nil {
+		return DataCopyStats{}, fmt.Errorf("disable statement_timeout: %w", err)
+	}
 
 	var stats DataCopyStats
 	for _, table := range tables {
 		if !isCopyableTableKind(table.Kind) {
 			continue
 		}
+		if c.isExcludedTable(table) {
+			continue
+		}
 		if progress != nil {
 			progress(DataCopyProgress{Schema: table.Schema, TableName: table.Name})
 		}
-		tableStats, err := c.crawlTableRows(ctx, conn, table, batchSize, emit)
+		tableStats, err := c.crawlTableRows(ctx, conn, table, batchSize, emit, progress)
 		if err != nil {
 			return stats, err
 		}
@@ -127,7 +134,7 @@ func (c Crawler) CrawlData(ctx context.Context, tables []Table, batchSize int, e
 	return stats, nil
 }
 
-func (c Crawler) crawlTableRows(ctx context.Context, conn *pgx.Conn, table Table, batchSize int, emit func([]TableRow) error) (DataCopyStats, error) {
+func (c Crawler) crawlTableRows(ctx context.Context, conn *pgx.Conn, table Table, batchSize int, emit func([]TableRow) error, progress func(DataCopyProgress)) (DataCopyStats, error) {
 	query := fmt.Sprintf("select to_jsonb(t)::text from %s as t", qualifiedName(table.Schema, table.Name))
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
@@ -154,6 +161,9 @@ func (c Crawler) crawlTableRows(ctx context.Context, conn *pgx.Conn, table Table
 				return DataCopyStats{}, err
 			}
 			batch = batch[:0]
+			if progress != nil && rowNumber%10000 == 0 {
+				progress(DataCopyProgress{Schema: table.Schema, TableName: table.Name, Rows: rowNumber})
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -165,6 +175,21 @@ func (c Crawler) crawlTableRows(ctx context.Context, conn *pgx.Conn, table Table
 		}
 	}
 	return DataCopyStats{Tables: 1, Rows: rowNumber}, nil
+}
+
+func (c Crawler) isExcludedTable(table Table) bool {
+	name := strings.ToLower(table.Schema + "." + table.Name)
+	shortName := strings.ToLower(table.Name)
+	for _, excluded := range c.ExcludeTables {
+		excluded = strings.ToLower(strings.TrimSpace(excluded))
+		if excluded == "" {
+			continue
+		}
+		if excluded == name || excluded == shortName {
+			return true
+		}
+	}
+	return false
 }
 
 func isCopyableTableKind(kind string) bool {

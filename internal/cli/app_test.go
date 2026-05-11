@@ -97,9 +97,11 @@ func TestDataProgressWritesToStderr(t *testing.T) {
 	require.NotNil(t, progress)
 
 	progress(postgres.DataCopyProgress{Schema: "public", TableName: "companies"})
+	progress(postgres.DataCopyProgress{Schema: "public", TableName: "companies", Rows: 10000})
 	progress(postgres.DataCopyProgress{Schema: "public", TableName: "companies", Rows: 2, Done: true})
 
 	require.Contains(t, stderr.String(), "copying public.companies")
+	require.Contains(t, stderr.String(), "copying public.companies: 10000 rows")
 	require.Contains(t, stderr.String(), "copied public.companies: 2 rows")
 }
 
@@ -125,4 +127,15 @@ func writeTestSnapshot(t *testing.T, path string, rlsEnabled bool) {
 			RLSEnabled: rlsEnabled,
 		}},
 	}))
+}
+
+func TestStringListFlagCollectsRepeatedValues(t *testing.T) {
+	var values stringListFlag
+
+	require.NoError(t, values.Set("public.enrichments"))
+	require.NoError(t, values.Set("auth.audit_log_entries"))
+
+	require.Equal(t, stringListFlag{"public.enrichments", "auth.audit_log_entries"}, values)
+	require.Equal(t, "public.enrichments,auth.audit_log_entries", values.String())
+	require.Error(t, values.Set(" "))
 }

@@ -229,12 +229,14 @@ func (a *App) runDoctor(ctx context.Context, configPath string, format OutputFor
 func (a *App) runSync(ctx context.Context, configPath string, args []string, format OutputFormat) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
+	var excludeTables stringListFlag
 	projectID := fs.String("project-id", "", "override project id for this sync")
 	includeData := fs.Bool("data", false, "copy source table rows into local SQLite as JSON")
 	full := fs.Bool("full", false, "copy metadata and source table rows")
 	batchSize := fs.Int("batch-size", 1000, "row batch size for data copies")
 	noRowFTS := fs.Bool("no-row-fts", false, "skip FTS indexing for copied table rows to reduce archive size")
 	noProgress := fs.Bool("no-progress", false, "disable per-table progress on stderr")
+	fs.Var(&excludeTables, "exclude-table", "skip a table during data copy; repeatable, accepts table or schema.table")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -250,18 +252,19 @@ func (a *App) runSync(ctx context.Context, configPath string, args []string, for
 	if *projectID != "" {
 		cfg.Source.ProjectID = *projectID
 	}
-	result, err := a.syncArchive(ctx, cfg, url, source, *includeData || *full, *batchSize, !*noRowFTS, *noProgress, format)
+	result, err := a.syncArchive(ctx, cfg, url, source, *includeData || *full, *batchSize, !*noRowFTS, *noProgress, format, excludeTables)
 	if err != nil {
 		return err
 	}
 	return a.writeOutput("Sync", result, format)
 }
 
-func (a *App) syncArchive(ctx context.Context, cfg config.Config, url string, source string, includeData bool, batchSize int, includeRowFTS bool, noProgress bool, format OutputFormat) (map[string]any, error) {
+func (a *App) syncArchive(ctx context.Context, cfg config.Config, url string, source string, includeData bool, batchSize int, includeRowFTS bool, noProgress bool, format OutputFormat, excludeTables []string) (map[string]any, error) {
 	crawler := postgres.Crawler{
 		DatabaseURL:    url,
 		ProjectID:      cfg.Source.ProjectID,
 		ExcludeSchemas: cfg.Source.ExcludeSchemas,
+		ExcludeTables:  excludeTables,
 	}
 	snapshot, err := crawler.Crawl(ctx)
 	if err != nil {
@@ -280,6 +283,9 @@ func (a *App) syncArchive(ctx context.Context, cfg config.Config, url string, so
 		"project":             snapshot.Project,
 		"counts":              snapshot.Counts(),
 		"db_path":             cfg.DBPath,
+	}
+	if len(excludeTables) > 0 {
+		result["excluded_tables"] = excludeTables
 	}
 	if includeData {
 		if err := st.BeginDataCopy(ctx, includeRowFTS); err != nil {
@@ -312,12 +318,35 @@ func (a *App) dataProgress(format OutputFormat, disabled bool) func(postgres.Dat
 			}
 			return
 		}
+		if progress.Rows > 0 {
+			if format == FormatLog {
+				fmt.Fprintf(a.Stderr, "copy table=%s rows=%d done=false\n", table, progress.Rows)
+			} else {
+				fmt.Fprintf(a.Stderr, "copying %s: %d rows...\n", table, progress.Rows)
+			}
+			return
+		}
 		if format == FormatLog {
 			fmt.Fprintf(a.Stderr, "copy table=%s done=false\n", table)
 		} else {
 			fmt.Fprintf(a.Stderr, "copying %s...\n", table)
 		}
 	}
+}
+
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value cannot be empty")
+	}
+	*f = append(*f, value)
+	return nil
 }
 
 type readSyncOverrides struct {
@@ -429,7 +458,7 @@ func (a *App) ensureFresh(ctx context.Context, cfg config.Config, options readSy
 	if a.Stderr != nil {
 		fmt.Fprintln(a.Stderr, "refreshing local archive metadata")
 	}
-	_, err = a.syncArchive(ctx, cfg, url, source, false, 1000, true, true, FormatText)
+	_, err = a.syncArchive(ctx, cfg, url, source, false, 1000, true, true, FormatText, nil)
 	return err
 }
 
@@ -829,7 +858,7 @@ func (a *App) runStoragePull(ctx context.Context, configPath string, args []stri
 	if err != nil {
 		return err
 	}
-	key, _, err := cfg.ResolveServiceRoleKey()
+	key, _, err := cfg.ResolveSecretKey()
 	if err != nil {
 		return err
 	}
@@ -1168,6 +1197,7 @@ Quick start:
   supacrawl metadata --json
   supacrawl sync
   supacrawl sync --full --no-row-fts
+  supacrawl sync --full --no-row-fts --exclude-table public.enrichments
   supacrawl status --sync auto --stale-after 15m
   supacrawl diff /path/to/older-archive.db --json
   supacrawl size

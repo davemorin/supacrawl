@@ -43,6 +43,7 @@ tools:
 
 - `SUPABASE_DB_URL` for Postgres metadata and row sync
 - `SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_URL` for Storage downloads
-- `SUPABASE_SERVICE_ROLE_KEY` for private Storage downloads
+- `SUPABASE_SECRET_KEY` for private Storage downloads
+- `SUPABASE_SERVICE_ROLE_KEY` is still supported as a legacy fallback
 - `SUPACRAWL_AGE_RECIPIENT` for backup encryption
 - `SUPACRAWL_AGE_IDENTITY` for backup restore

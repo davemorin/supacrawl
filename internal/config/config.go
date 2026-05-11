@@ -28,7 +28,8 @@ type SourceConfig struct {
 	DatabaseURLEnv    string   `toml:"database_url_env"`
 	SupabaseURL       string   `toml:"supabase_url"`
 	SupabaseURLEnv    string   `toml:"supabase_url_env"`
-	ServiceRoleKeyEnv string   `toml:"service_role_key_env"`
+	SecretKeyEnv      string   `toml:"secret_key_env"`
+	ServiceRoleKeyEnv string   `toml:"service_role_key_env,omitempty"`
 	ExcludeSchemas    []string `toml:"exclude_schemas"`
 }
 
@@ -56,9 +57,9 @@ func Default() Config {
 		DBPath:  filepath.ToSlash(filepath.Join(base, "supacrawl.db")),
 		LogDir:  filepath.ToSlash(filepath.Join(base, "logs")),
 		Source: SourceConfig{
-			DatabaseURLEnv:    "SUPABASE_DB_URL",
-			SupabaseURLEnv:    "SUPABASE_URL",
-			ServiceRoleKeyEnv: "SUPABASE_SERVICE_ROLE_KEY",
+			DatabaseURLEnv: "SUPABASE_DB_URL",
+			SupabaseURLEnv: "SUPABASE_URL",
+			SecretKeyEnv:   "SUPABASE_SECRET_KEY",
 			ExcludeSchemas: []string{
 				"information_schema",
 				"pg_catalog",
@@ -135,8 +136,8 @@ func (c *Config) Normalize() error {
 	if strings.TrimSpace(c.Source.SupabaseURLEnv) == "" && strings.TrimSpace(c.Source.SupabaseURL) == "" {
 		c.Source.SupabaseURLEnv = Default().Source.SupabaseURLEnv
 	}
-	if strings.TrimSpace(c.Source.ServiceRoleKeyEnv) == "" {
-		c.Source.ServiceRoleKeyEnv = Default().Source.ServiceRoleKeyEnv
+	if strings.TrimSpace(c.Source.SecretKeyEnv) == "" && strings.TrimSpace(c.Source.ServiceRoleKeyEnv) == "" {
+		c.Source.SecretKeyEnv = Default().Source.SecretKeyEnv
 	}
 	if len(c.Source.ExcludeSchemas) == 0 {
 		c.Source.ExcludeSchemas = Default().Source.ExcludeSchemas
@@ -244,16 +245,40 @@ func (c Config) ResolveSupabaseURL() (string, string, error) {
 	return "", strings.Join(envNames, ","), fmt.Errorf("%s is not set", strings.Join(envNames, " or "))
 }
 
+func (c Config) ResolveSecretKey() (string, string, error) {
+	envNames := uniqueNonEmpty(
+		strings.TrimSpace(c.Source.SecretKeyEnv),
+		strings.TrimSpace(c.Source.ServiceRoleKeyEnv),
+		"SUPABASE_SECRET_KEY",
+		"SUPABASE_SERVICE_ROLE_KEY",
+	)
+	if len(envNames) == 0 {
+		return "", "", errors.New("source.secret_key_env is empty")
+	}
+	for _, envName := range envNames {
+		value := strings.TrimSpace(os.Getenv(envName))
+		if value != "" {
+			return value, envName, nil
+		}
+	}
+	return "", strings.Join(envNames, ","), fmt.Errorf("%s is not set", strings.Join(envNames, " or "))
+}
+
 func (c Config) ResolveServiceRoleKey() (string, string, error) {
-	envName := strings.TrimSpace(c.Source.ServiceRoleKeyEnv)
-	if envName == "" {
-		return "", "", errors.New("source.service_role_key_env is empty")
+	return c.ResolveSecretKey()
+}
+
+func uniqueNonEmpty(values ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
 	}
-	value := strings.TrimSpace(os.Getenv(envName))
-	if value == "" {
-		return "", envName, fmt.Errorf("%s is not set", envName)
-	}
-	return value, envName, nil
+	return out
 }
 
 func ExpandPath(path string) (string, error) {

@@ -133,10 +133,16 @@ Storage downloads also need:
 
 ```bash
 export SUPABASE_URL="https://<ref>.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="..."
+export SUPABASE_SECRET_KEY="sb_secret_..."
 ```
 
 If `SUPABASE_URL` is not set, `supacrawl` will also try `NEXT_PUBLIC_SUPABASE_URL`.
+If `SUPABASE_SECRET_KEY` is not set, `supacrawl` will also try the legacy
+`SUPABASE_SERVICE_ROLE_KEY` name.
+
+Supabase API keys are separate from the Postgres connection string. Use
+`SUPABASE_DB_URL` for metadata and row sync. Use `SUPABASE_SECRET_KEY` only for
+private Storage downloads.
 
 ## Read Freshness
 
@@ -184,6 +190,12 @@ Use `--no-row-fts` when archive size matters more than full-text search over row
 
 ```bash
 supacrawl sync --full --no-row-fts
+```
+
+Use `--exclude-table` for pathological tables you want to skip during row copy:
+
+```bash
+supacrawl sync --full --no-row-fts --exclude-table public.enrichments
 ```
 
 ## Diff

@@ -8,7 +8,7 @@ database_url = ""
 database_url_env = "SUPABASE_DB_URL"
 supabase_url = ""
 supabase_url_env = "SUPABASE_URL"
-service_role_key_env = "SUPABASE_SERVICE_ROLE_KEY"
+secret_key_env = "SUPABASE_SECRET_KEY"
 exclude_schemas = ["information_schema", "pg_catalog", "pg_toast", "pg_temp_%"]
 
 [search]

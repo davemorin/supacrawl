@@ -14,7 +14,8 @@ func TestDefaultNormalizesPaths(t *testing.T) {
 	require.True(t, filepath.IsAbs(cfg.DBPath))
 	require.Equal(t, "SUPABASE_DB_URL", cfg.Source.DatabaseURLEnv)
 	require.Equal(t, "SUPABASE_URL", cfg.Source.SupabaseURLEnv)
-	require.Equal(t, "SUPABASE_SERVICE_ROLE_KEY", cfg.Source.ServiceRoleKeyEnv)
+	require.Equal(t, "SUPABASE_SECRET_KEY", cfg.Source.SecretKeyEnv)
+	require.Empty(t, cfg.Source.ServiceRoleKeyEnv)
 	require.Equal(t, 20, cfg.Search.DefaultLimit)
 	require.Equal(t, "auto", cfg.Sync.ReadPolicy)
 	require.Equal(t, "15m", cfg.Sync.StaleAfter)
@@ -55,4 +56,25 @@ func TestResolveSupabaseURLFallsBackToPublicEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://example.supabase.co", value)
 	require.Equal(t, "NEXT_PUBLIC_SUPABASE_URL", source)
+}
+
+func TestResolveSecretKeyPrefersCurrentEnv(t *testing.T) {
+	cfg := Default()
+	t.Setenv("SUPABASE_SECRET_KEY", "sb_secret_current")
+	t.Setenv("SUPABASE_SERVICE_ROLE_KEY", "legacy-service-role")
+
+	value, source, err := cfg.ResolveSecretKey()
+	require.NoError(t, err)
+	require.Equal(t, "sb_secret_current", value)
+	require.Equal(t, "SUPABASE_SECRET_KEY", source)
+}
+
+func TestResolveSecretKeyFallsBackToLegacyServiceRoleEnv(t *testing.T) {
+	cfg := Default()
+	t.Setenv("SUPABASE_SERVICE_ROLE_KEY", "legacy-service-role")
+
+	value, source, err := cfg.ResolveSecretKey()
+	require.NoError(t, err)
+	require.Equal(t, "legacy-service-role", value)
+	require.Equal(t, "SUPABASE_SERVICE_ROLE_KEY", source)
 }
